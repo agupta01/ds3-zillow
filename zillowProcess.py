@@ -12,7 +12,7 @@ years_fmt = mdates.DateFormatter('%Y')
 
 print("Loading Data...")
 city = pd.read_csv("./data/City_time_series.csv")
-prefilter_shape = city.shape[0]
+prefilter_shape = city.shape[0]pip insta
 print(city.columns)
 
 # Begin filtering
