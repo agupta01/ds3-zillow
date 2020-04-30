@@ -9,10 +9,20 @@ def hello_world():
     print("hello world")
 
 
+failed_cities = []
+
+
 # def areaUnder3Algorithm(data, predictor=ARIMA_50, )
 
+def find_AU3(time_series):
+    start = find_start(time_series)
+    predicted = ARIMA(time_series, start)
+    residuals = calculate_residuals(time_series, predicted)
+    end = find_end(residuals)
+    return calculate_area(residuals, start, end)
 
-def find_start(city):
+
+def find_start(series):
     """
     returns recession start date, measured as the largest local maximum ZHVI for a given city
     takes: city (pd.dataframe) [Date, ZHVI_avg_norm]
@@ -20,47 +30,82 @@ def find_start(city):
     """
     RECESSION_END = '2015'
     VALUE_COL = 'ZHVI_std'
-    THRESHOLD = 1
+    MAX_THRESHOLD = 1
 
-    # Get latest date from city
-    last_date = city.sort_values('Date', ascending=False).iloc[0]['Date']
-    city = city[city['Date'] < RECESSION_END]
+    # difference, find local maxes, choose appropriate max,
 
-    def moving_difference(index):
-        return city[VALUE_COL].iloc[index] - city[VALUE_COL].iloc[index-1]
+    series_to_recession_end = series[:RECESSION_END]
 
-    diffs = np.array([moving_difference(i) for i in range(1, len(city))])
-
-    # Reshape dataframe to include diffs, then add diffs
-    city = city.iloc[1:]
-    city['Diffs'] = diffs
-
-    # Find local maxes using diffs
-    is_max = np.array([(city['Diffs'].iloc[i] >= 0)
-                       and (city['Diffs'].iloc[i+1] <= 0)
-                       and (city['Diffs'].iloc[i+1] - city['Diffs'].iloc[i] <= THRESHOLD) for i in range(len(city) - 1)])
-    is_max = np.append(is_max, False)
+    recession_maxes = get_local_maxes(series_to_recession_end)
 
     # Check for presence of local maxes at all
-    if np.count_nonzero(is_max) == 0:
+    if len(recession_maxes) == 0:
+        last_date = series.idxmax()
         return last_date
 
-    # Add 'is_maximum' truth column to dataframe
-    city['Max'] = is_max
-
     # Find date of recession minimum
-    recession_minimum_date = my_min(city1)
+    # TODO recession_minimum_date = my_min(city)
 
-    # Filter and find largest max
-    recession_max = city[(city['Max'] == 1.0)
-                         & (city['Date'] < recession_minimum_date)].sort_values("ZHVI_std", ascending=False).iloc[0]
+    # Filter largest max before min
+    recession_start_date = recession_maxes.idxmax()
 
-    start_date = recession_max['Date']
-
-    return start_date
+    return recession_start_date
 
 
-def my_min(city_df, thershold=-0.002):
+def find_end(residuals):
+    """
+    Finds end date by calculating residuals between predicted and actual values, then finding most recent positive residual
+    returns recession end date, measured as the first point of intersection between ZHVI and ARIMA_50 for a given city
+    takes: city (pd.dataframe) [Date, ZHVI_avg_norm], ARIMA (pd.dataframe) [Date, forecasted_ZHVI_norm] 
+    returns: end_date (pd.datetime)
+    """
+    # Filter only negative residuals representing when actual time-series surpasses predicted
+    negative_residuals = residuals[residuals < 0]
+
+   # If time-series surpasses predictions, end date is earliest date surpassed
+   # Else, end date last date in time-series
+    if (len(negative_residuals) != 0):
+        recession_end_date = negative.index[0]
+    else:
+        recession_end_date = residuals.index[-1]
+
+    return recession_end_date
+
+
+def calculate_area(residuals, start, end):
+    recession_residuals = residuals[start:end]
+    return recession_residuals.sum()
+
+
+# Predictor Functions
+
+def ARIMA(series, start, params=(5, 1, 1)):
+    """
+    Params:
+    city -- time-series dataframe object containing Date and ZHVI columns
+    start -- datetime object from index of city representing peak ZHVI
+    params -- p, d, and q parameters for ARIMA
+    """
+    from statsmodels.tsa.arima_model import ARIMA
+    START = start
+
+    series_before_recession_start = series[:START]
+    dates_after_recession_start = series[START:].index[1:]
+    steps = len(dates_after_recession_start)
+
+    # Try to fit arima model, except if no convergence add to list of failed cities
+    # TODO use datetime component
+    try:
+        model = ARIMA(series_before_recession_start, order=(5, 1, 1))
+        model_fit = model.fit(disp=0)
+        predicted_values = model_fit.forecast(steps)[0]
+        return pd.Series(predicted_values, index=dates_after_recession_start)
+    except:
+        # TODO Handle exception
+        pass
+
+
+def my_min(city_df, threshold=-0.002):
     """
     Finds new 
     Params:
@@ -92,3 +137,39 @@ def my_min(city_df, thershold=-0.002):
                 break
 
     return min_dates[curr_index]
+
+
+def moving_difference(series):
+    """
+    Differences series to identify extrema.
+    """
+    MAX_THRESHOLD = 1
+
+    difference_index = series.index[1:]
+    difference_values = series[1:].values - series[:-1].values
+    differences = pd.Series(difference_index, difference_values)
+
+    # Create filter for maxes where max occurs when difference is positive but difference after is negative
+    # TODO Explain MAX_THRESHOLD, implement w/o for loop
+    max_filter = np.array([(difference_values[i] >= 0)
+                           & (difference_values[i+1] <= 0)
+                           & (difference_values[i+1] - difference_values[i] <= MAX_THRESHOLD)
+                           for i in range(len(differences) - 1)],
+                          dtype=bool)
+    max_filter = np.append(max_filter, False)
+
+    maxes = series[1:][max_filter]
+
+    return maxes
+
+
+def get_local_maxes(series, extrema_function=moving_difference):
+    """
+    Uses moving difference to identify local maxes
+    """
+    return moving_difference(series)
+
+
+def calculate_residuals(actual_series, predicted_series):
+
+    return (predicted_series - actual_series).dropna()
